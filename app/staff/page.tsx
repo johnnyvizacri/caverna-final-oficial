@@ -136,6 +136,17 @@ export default function StaffLogin() {
           </div>
         </Link>
 
+        {/* BOTÃO NOVO: MEUS EVENTOS (LISTA) */}
+        <Link href="/staff/eventos">
+          <div className="bg-white text-black p-6 rounded-2xl flex items-center gap-4 shadow-xl hover:scale-105 transition-transform cursor-pointer border-2 border-gray-200 group">
+            <div className="bg-blue-100 text-blue-600 p-4 rounded-full text-2xl">📋</div>
+            <div>
+              <h3 className="font-black text-xl uppercase">Meus Eventos</h3>
+              <p className="text-gray-600 text-xs">Ativar, desativar e editar</p>
+            </div>
+          </div>
+        </Link>
+
       </div>
       
       <p className="mt-auto pt-10 text-xs font-bold opacity-50 uppercase tracking-widest">Sistema Caverna Staff</p>
