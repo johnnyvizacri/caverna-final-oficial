@@ -6,10 +6,11 @@ import { supabase } from '../lib/supabase'
 
 export default function Checkin() {
   const router = useRouter()
-  const [scanResult, setScanResult] = useState<string | null>(null)
+  
+  // Estados da Interface
   const [message, setMessage] = useState('Aponte para o QR Code')
-  const [statusColor, setStatusColor] = useState('bg-black') // Fundo padrão preto
-  const [showList, setShowList] = useState(false) // Controla se mostra a lista
+  const [statusColor, setStatusColor] = useState('bg-black') // Controla a cor do fundo (pisca)
+  const [showList, setShowList] = useState(false) // Abre/Fecha modal da lista
   
   // Dados
   const [tickets, setTickets] = useState<any[]>([])
@@ -17,7 +18,7 @@ export default function Checkin() {
   
   const scannerRef = useRef<Html5Qrcode | null>(null)
 
-  // 1. Proteção de Rota (Se não tiver senha, chuta fora)
+  // 1. SEGURANÇA: Se não estiver logado, manda voltar
   useEffect(() => {
     const isAuth = localStorage.getItem('staff_auth')
     if (isAuth !== 'true') {
@@ -25,17 +26,20 @@ export default function Checkin() {
     }
   }, [])
 
+  // 2. INICIALIZAÇÃO: Liga Câmera e Carrega Lista
   useEffect(() => {
     startCamera()
     loadGuestList()
 
     return () => {
+      // Limpeza ao sair da página
       if (scannerRef.current?.isScanning) {
-        scannerRef.current.stop().catch(err => console.error(err))
+        scannerRef.current.stop().catch(err => console.error("Erro ao parar camera", err))
       }
     }
   }, [])
 
+  // Função: Carregar Lista do Banco
   async function loadGuestList() {
     const { data } = await supabase
       .from('tickets')
@@ -45,29 +49,33 @@ export default function Checkin() {
     if (data) setTickets(data)
   }
 
+  // Função: Iniciar Câmera
   async function startCamera() {
     try {
+      // Pede permissão
       await navigator.mediaDevices.getUserMedia({ video: true })
       
       const html5QrCode = new Html5Qrcode("reader")
       scannerRef.current = html5QrCode
 
       await html5QrCode.start(
-        { facingMode: "environment" },
+        { facingMode: "environment" }, // Câmera traseira
         { fps: 10, qrbox: { width: 250, height: 250 } },
-        (decodedText) => { onScanSuccess(decodedText) },
-        (errorMessage) => {}
+        (decodedText) => { onScanSuccess(decodedText) }, // Se ler, chama essa função
+        (errorMessage) => {} // Se falhar frame, ignora
       )
     } catch (err) {
       console.error("Erro câmera:", err)
-      setMessage('⚠️ Câmera bloqueada. Use a Lista Manual.')
+      setMessage('⚠️ Câmera bloqueada ou indisponível.\nUse a Lista Manual abaixo.')
     }
   }
 
+  // Lógica: QR Code Lido
   async function onScanSuccess(decodedText: string) {
     if(!scannerRef.current) return
-    try { await scannerRef.current.pause() } catch(e){}
+    try { await scannerRef.current.pause() } catch(e){} // Pausa para não ler 2x
 
+    // Procura na memória (mais rápido que ir no banco)
     const ticketIndex = tickets.findIndex(t => t.ticket_hash === decodedText)
     
     if (ticketIndex === -1) {
@@ -79,17 +87,18 @@ export default function Checkin() {
     processCheckin(ticket)
   }
 
+  // Lógica: Processar Entrada (Serve p/ Câmera e Manual)
   async function processCheckin(ticket: any) {
     if (ticket.status === 'checked_in') {
       flashScreen('bg-orange-600', `⚠️ JÁ ENTROU!\n${ticket.customer_name}`)
     } else {
-      // Atualiza Banco
+      // 1. Atualiza no Banco
       await supabase
         .from('tickets')
         .update({ status: 'checked_in', checked_in_at: new Date() })
         .eq('id', ticket.id)
 
-      // Atualiza Local
+      // 2. Atualiza na Memória (para o contador mudar na hora)
       const updatedList = tickets.map(t => 
         t.id === ticket.id ? { ...t, status: 'checked_in', checked_in_at: new Date() } : t
       )
@@ -99,105 +108,123 @@ export default function Checkin() {
     }
   }
 
+  // Efeito Visual: Piscar Tela
   function flashScreen(color: string, msg: string) {
     setStatusColor(color)
     setMessage(msg)
     
+    // Volta ao normal depois de 2.5 segundos
     setTimeout(async () => {
-      setStatusColor('bg-black') // Volta pro preto neutro
-      setMessage('Pronto para o próximo...')
+      setStatusColor('bg-black')
+      setMessage('Aponte para o QR Code...')
       try { await scannerRef.current?.resume() } catch(e){}
     }, 2500)
   }
 
-  // Contadores
+  // --- CÁLCULOS DOS CONTADORES ---
   const totalVendidos = tickets.length
   const totalEntraram = tickets.filter(t => t.status === 'checked_in').length
   const totalFaltam = totalVendidos - totalEntraram
 
-  // Filtro
+  // Filtro da Lista Manual
   const filteredTickets = tickets.filter(t => 
-    t.customer_name?.toLowerCase().includes(searchTerm.toLowerCase())
+    t.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    t.customer_cpf?.includes(searchTerm)
   )
 
   return (
-    <div className={`min-h-screen ${statusColor} text-white transition-colors duration-300 flex flex-col relative`}>
+    <div className={`min-h-screen ${statusColor} text-white transition-colors duration-300 flex flex-col relative overflow-hidden`}>
       
-      {/* --- CABEÇALHO COM CONTADORES --- */}
-      <div className="bg-gray-900/90 backdrop-blur p-3 grid grid-cols-3 gap-2 text-center border-b border-gray-700 z-20">
-        <div className="bg-green-900/50 rounded p-1">
-          <span className="block text-xl font-bold text-green-400">{totalEntraram}</span>
-          <span className="text-[10px] uppercase">Dentro</span>
+      {/* --- PLACAR FIXO NO TOPO --- */}
+      <div className="bg-gray-900/90 backdrop-blur-md p-2 grid grid-cols-3 gap-2 text-center border-b border-gray-700 z-20 shadow-lg">
+        <div className="bg-green-900/40 rounded p-2 border border-green-900/50">
+          <span className="block text-2xl font-black text-green-400 leading-none">{totalEntraram}</span>
+          <span className="text-[9px] font-bold uppercase tracking-widest text-green-200/50">Dentro</span>
         </div>
-        <div className="bg-red-900/50 rounded p-1">
-          <span className="block text-xl font-bold text-red-400">{totalFaltam}</span>
-          <span className="text-[10px] uppercase">Faltam</span>
+        <div className="bg-red-900/40 rounded p-2 border border-red-900/50">
+          <span className="block text-2xl font-black text-red-400 leading-none">{totalFaltam}</span>
+          <span className="text-[9px] font-bold uppercase tracking-widest text-red-200/50">Faltam</span>
         </div>
-        <div className="bg-gray-700/50 rounded p-1">
-          <span className="block text-xl font-bold text-white">{totalVendidos}</span>
-          <span className="text-[10px] uppercase">Total</span>
+        <div className="bg-gray-800 rounded p-2 border border-gray-700">
+          <span className="block text-2xl font-black text-white leading-none">{totalVendidos}</span>
+          <span className="text-[9px] font-bold uppercase tracking-widest text-gray-500">Total</span>
         </div>
       </div>
 
-      {/* --- ÁREA DA CÂMERA --- */}
-      <div className="flex-1 relative bg-black">
+      {/* --- ÁREA DA CÂMERA (OCUPA O RESTO DA TELA) --- */}
+      <div className="flex-1 relative bg-black flex items-center justify-center">
         <div id="reader" className="w-full h-full object-cover absolute inset-0"></div>
         
-        {/* Mensagem Flutuante */}
-        <div className="absolute bottom-24 left-0 right-0 text-center px-4 pointer-events-none">
-          <span className="bg-black/60 text-white px-4 py-2 rounded-full font-bold text-lg backdrop-blur-sm whitespace-pre-line shadow-lg">
+        {/* Mensagem Centralizada */}
+        <div className="absolute bottom-32 left-0 right-0 text-center px-6 pointer-events-none z-10">
+          <span className="bg-black/70 text-white px-6 py-4 rounded-2xl font-bold text-lg backdrop-blur-md whitespace-pre-line shadow-2xl border border-white/10 inline-block">
             {message}
           </span>
         </div>
       </div>
 
-      {/* --- BOTÃO LISTA --- */}
-      <div className="fixed bottom-6 right-6 z-30">
+      {/* --- BOTÃO FLUTUANTE DA LISTA --- */}
+      <div className="fixed bottom-8 right-8 z-30">
         <button 
           onClick={() => setShowList(true)}
-          className="bg-white text-black w-14 h-14 rounded-full shadow-[0_0_20px_rgba(255,255,255,0.5)] flex items-center justify-center font-bold text-2xl active:scale-90 transition-transform"
+          className="bg-white text-black w-16 h-16 rounded-full shadow-[0_0_30px_rgba(255,255,255,0.3)] flex items-center justify-center active:scale-90 transition-transform hover:bg-gray-200"
         >
-          📋
+          <span className="text-3xl">📋</span>
         </button>
       </div>
 
-      {/* --- MODAL DA LISTA --- */}
+      {/* --- MODAL DA LISTA MANUAL --- */}
       {showList && (
         <div className="fixed inset-0 bg-gray-900 z-50 flex flex-col animate-in slide-in-from-bottom duration-300">
-          <div className="p-4 bg-gray-800 flex justify-between items-center shadow-lg">
-            <h2 className="font-bold text-lg uppercase">Lista de Convidados</h2>
-            <button onClick={() => setShowList(false)} className="text-gray-400 hover:text-white font-bold p-2">FECHAR ✕</button>
+          
+          {/* Cabeçalho do Modal */}
+          <div className="p-4 bg-gray-800 flex justify-between items-center shadow-lg border-b border-gray-700">
+            <h2 className="font-bold text-lg uppercase text-white tracking-widest">Lista de Convidados</h2>
+            <button 
+              onClick={() => setShowList(false)}
+              className="text-gray-400 hover:text-white font-bold text-sm bg-black/20 px-3 py-1 rounded"
+            >
+              FECHAR X
+            </button>
           </div>
 
-          <div className="p-4 bg-gray-900 border-b border-gray-800">
+          {/* Campo de Busca */}
+          <div className="p-4 bg-gray-900">
              <input 
               autoFocus
               type="text" 
-              placeholder="Buscar nome ou CPF..." 
-              className="w-full bg-black border border-gray-700 rounded-lg p-4 text-white focus:border-purple-500 outline-none"
+              placeholder="Digite nome ou CPF..." 
+              className="w-full bg-black border border-gray-700 rounded-xl p-4 text-white focus:border-yellow-500 outline-none transition-colors text-lg"
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-20">
+          {/* Lista Rolável */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-10 bg-black/50">
+             {filteredTickets.length === 0 && (
+                <p className="text-center text-gray-500 mt-10 italic">Nenhum convidado encontrado.</p>
+             )}
+
              {filteredTickets.map((ticket) => (
-                <div key={ticket.id} className="flex items-center justify-between bg-black/40 p-3 rounded-lg border border-gray-800">
+                <div key={ticket.id} className="flex items-center justify-between bg-gray-800 p-4 rounded-xl border border-gray-700 shadow-sm">
                   <div>
-                    <p className="font-bold text-white">{ticket.customer_name}</p>
-                    <p className="text-xs text-gray-500">{ticket.customer_cpf}</p>
+                    <p className="font-bold text-white text-lg">{ticket.customer_name}</p>
+                    <p className="text-xs text-gray-400 font-mono mt-1">{ticket.customer_cpf} • {ticket.events?.title}</p>
                   </div>
                   
                   {ticket.status === 'checked_in' ? (
-                    <span className="text-green-500 text-xs font-bold border border-green-900 bg-green-900/20 px-3 py-1 rounded">ENTROU</span>
+                    <span className="text-green-500 text-[10px] font-black border border-green-900 bg-green-900/20 px-3 py-1 rounded uppercase tracking-widest">
+                      JÁ ENTROU
+                    </span>
                   ) : (
                     <button 
                       onClick={() => {
-                        if(confirm(`Liberar entrada de ${ticket.customer_name}?`)) {
+                        if(confirm(`Confirmar entrada manual de: ${ticket.customer_name}?`)) {
                           processCheckin(ticket)
-                          setShowList(false)
+                          setShowList(false) // Fecha a lista para mostrar o verde
                         }
                       }}
-                      className="bg-white text-black px-4 py-2 rounded font-bold text-xs uppercase hover:bg-gray-200"
+                      className="bg-white text-black px-5 py-2 rounded-lg font-black text-xs uppercase hover:bg-gray-200 active:scale-95 transition-transform"
                     >
                       Liberar
                     </button>
