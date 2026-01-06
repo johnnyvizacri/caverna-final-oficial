@@ -1,26 +1,39 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
+import { useRouter } from 'next/navigation' // <--- NOVO: Importante para redirecionar
 import { Html5Qrcode } from 'html5-qrcode'
 import { supabase } from '../lib/supabase'
 
 export default function Checkin() {
+  const router = useRouter() // <--- NOVO: Inicializa o roteador
+
   const [scanResult, setScanResult] = useState<string | null>(null)
   const [message, setMessage] = useState('Aponte para o QR Code')
-  const [statusColor, setStatusColor] = useState('bg-black') // Fundo padrão preto
-  const [showList, setShowList] = useState(false) // Controla se mostra a lista ou camera
+  const [statusColor, setStatusColor] = useState('bg-black') 
+  const [showList, setShowList] = useState(false) 
   
-  // Dados
   const [tickets, setTickets] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   
   const scannerRef = useRef<Html5Qrcode | null>(null)
 
   useEffect(() => {
+    // --- 1. BLOQUEIO DE SEGURANÇA (NOVO) ---
+    // Verifica se o usuário tem a chave 'staff_auth' salva no navegador
+    const isLogged = localStorage.getItem('staff_auth')
+    
+    if (isLogged !== 'true') {
+      // Se não tiver a chave, chuta ele para a tela de login
+      router.push('/staff')
+      return 
+    }
+    // ---------------------------------------
+
+    // Se passou pela segurança, carrega o resto normal
     startCamera()
     loadGuestList()
 
     return () => {
-      // Limpeza ao sair
       if (scannerRef.current?.isScanning) {
         scannerRef.current.stop().catch(err => console.error(err))
       }
@@ -74,13 +87,11 @@ export default function Checkin() {
     if (ticket.status === 'checked_in') {
       flashScreen('bg-orange-600', `⚠️ JÁ ENTROU!\n${ticket.customer_name}`)
     } else {
-      // Atualiza Banco
       await supabase
         .from('tickets')
         .update({ status: 'checked_in', checked_in_at: new Date() })
         .eq('id', ticket.id)
 
-      // Atualiza Local
       const updatedList = tickets.map(t => 
         t.id === ticket.id ? { ...t, status: 'checked_in', checked_in_at: new Date() } : t
       )
@@ -90,24 +101,21 @@ export default function Checkin() {
     }
   }
 
-  // Função para piscar a tela com a cor do resultado e voltar pro preto
   function flashScreen(color: string, msg: string) {
     setStatusColor(color)
     setMessage(msg)
     
     setTimeout(async () => {
-      setStatusColor('bg-black') // Volta pro preto neutro
+      setStatusColor('bg-black')
       setMessage('Pronto para o próximo...')
       try { await scannerRef.current?.resume() } catch(e){}
     }, 2500)
   }
 
-  // Contadores
   const totalVendidos = tickets.length
   const totalEntraram = tickets.filter(t => t.status === 'checked_in').length
   const totalFaltam = totalVendidos - totalEntraram
 
-  // Filtro
   const filteredTickets = tickets.filter(t => 
     t.customer_name.toLowerCase().includes(searchTerm.toLowerCase())
   )
@@ -115,7 +123,7 @@ export default function Checkin() {
   return (
     <div className={`min-h-screen ${statusColor} text-white transition-colors duration-300 flex flex-col relative`}>
       
-      {/* --- CABEÇALHO FIXO COM CONTADORES --- */}
+      {/* CABEÇALHO FIXO COM CONTADORES */}
       <div className="bg-gray-900/90 backdrop-blur p-3 grid grid-cols-3 gap-2 text-center border-b border-gray-700 z-20">
         <div className="bg-green-900/50 rounded p-1">
           <span className="block text-xl font-bold text-green-400">{totalEntraram}</span>
@@ -131,11 +139,9 @@ export default function Checkin() {
         </div>
       </div>
 
-      {/* --- ÁREA DA CÂMERA (OCUPA TUDO) --- */}
+      {/* CÂMERA */}
       <div className="flex-1 relative bg-black">
         <div id="reader" className="w-full h-full object-cover absolute inset-0"></div>
-        
-        {/* Mensagem Flutuante sobre a câmera */}
         <div className="absolute bottom-24 left-0 right-0 text-center px-4 pointer-events-none">
           <span className="bg-black/60 text-white px-4 py-2 rounded-full font-bold text-lg backdrop-blur-sm whitespace-pre-line shadow-lg">
             {message}
@@ -143,7 +149,7 @@ export default function Checkin() {
         </div>
       </div>
 
-      {/* --- BOTÃO FLUTUANTE PARA LISTA MANUAL --- */}
+      {/* BOTÃO LISTA */}
       <div className="fixed bottom-6 right-6 z-30">
         <button 
           onClick={() => setShowList(true)}
@@ -153,7 +159,7 @@ export default function Checkin() {
         </button>
       </div>
 
-      {/* --- MODAL DA LISTA MANUAL (SOBREPÕE TUDO) --- */}
+      {/* MODAL LISTA */}
       {showList && (
         <div className="fixed inset-0 bg-gray-900 z-50 flex flex-col animate-in slide-in-from-bottom duration-300">
           <div className="p-4 bg-gray-800 flex justify-between items-center shadow-lg">
@@ -193,7 +199,7 @@ export default function Checkin() {
                       onClick={() => {
                         if(confirm(`Liberar entrada de ${ticket.customer_name}?`)) {
                           processCheckin(ticket)
-                          setShowList(false) // Fecha a lista após liberar
+                          setShowList(false)
                         }
                       }}
                       className="bg-white text-black px-4 py-2 rounded font-bold text-xs uppercase hover:bg-gray-200"

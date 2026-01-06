@@ -32,8 +32,8 @@ export default function Home() {
           <Image 
             src="/logo-caverna.png" 
             alt="A Caverna Rio Preto" 
-            width={200} // Ajuste a largura conforme necessário
-            height={100} // Ajuste a altura conforme necessário
+            width={50} // Ajuste a largura conforme necessário
+            height={25} // Ajuste a altura conforme necessário
             className="object-contain hover:scale-105 transition-transform"
             priority // Carrega mais rápido por ser o logo principal
           />
