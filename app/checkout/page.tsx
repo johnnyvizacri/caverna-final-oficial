@@ -10,18 +10,14 @@ function CheckoutContent() {
   const eventName = searchParams.get('event') || 'Evento'
   const [loading, setLoading] = useState(false)
   
-  // Estados para Lotes
   const [batches, setBatches] = useState<any[]>([])
   const [selectedBatch, setSelectedBatch] = useState<any>(null)
 
-  // Carrega os Lotes assim que abre a página
   useEffect(() => {
     async function loadBatches() {
-      // 1. Pega o evento ativo
       const { data: event } = await supabase.from('events').select('id').eq('status', 'active').single()
       
       if (event) {
-        // 2. Busca os lotes desse evento
         const { data: batchData } = await supabase
           .from('event_batches')
           .select('*')
@@ -30,7 +26,6 @@ function CheckoutContent() {
         
         if (batchData) {
             setBatches(batchData)
-            // Tenta selecionar automaticamente o primeiro lote disponível
             const firstAvailable = batchData.find((b: any) => b.sold_tickets < b.total_tickets)
             if (firstAvailable) setSelectedBatch(firstAvailable)
         }
@@ -55,27 +50,39 @@ function CheckoutContent() {
     const cpf = formData.get('cpf') as string
     const phone = formData.get('phone') as string
 
-    // 1. Validação Final de Estoque
+    // 1. Validação Final de Estoque (BLINDAGEM ADICIONADA)
     const { data: batchCheck } = await supabase
         .from('event_batches')
         .select('sold_tickets, total_tickets')
         .eq('id', selectedBatch.id)
         .single()
     
-    if (batchCheck && batchCheck.sold_tickets >= batchCheck.total_tickets) {
+    // Se não conseguir ler o banco, para tudo
+    if (!batchCheck) {
+       alert('Erro de conexão ao verificar estoque. Tente novamente.')
+       setLoading(false)
+       return
+    }
+    
+    if (batchCheck.sold_tickets >= batchCheck.total_tickets) {
         alert('Ops! Esse lote esgotou agora. Escolha outro.')
         setLoading(false)
-        // Recarrega a página para atualizar os lotes
         window.location.reload()
         return
     }
 
-    // 2. Cria Ingresso
     const ticketHash = crypto.randomUUID()
     
-    // Busca ID do evento de novo só pra garantir
+    // Busca ID do evento (BLINDAGEM ADICIONADA)
     const { data: event } = await supabase.from('events').select('id').eq('status', 'active').single()
 
+    if (!event) {
+        alert('Erro crítico: Evento não localizado.')
+        setLoading(false)
+        return
+    }
+
+    // 2. Cria Ingresso
     const { data: ticket, error } = await supabase.from('tickets').insert({
         event_id: event.id,
         customer_name: name,
@@ -87,7 +94,7 @@ function CheckoutContent() {
 
     if (error) {
         console.log(error)
-        alert('Erro ao processar.')
+        alert('Erro ao processar ingresso.')
         setLoading(false)
     } else {
         // 3. Desconta do Lote
@@ -107,7 +114,7 @@ function CheckoutContent() {
         <h2 className="text-xl font-bold mb-4 text-center text-yellow-400 uppercase">Finalizar Compra</h2>
         <p className="text-center text-white font-bold mb-6">{eventName}</p>
 
-        {/* --- SELEÇÃO DE LOTES --- */}
+        {/* SELEÇÃO DE LOTES */}
         <div className="mb-6 space-y-2">
             <p className="text-xs font-bold text-gray-500 uppercase">1. Escolha seu ingresso</p>
             {batches.map(batch => {
@@ -138,7 +145,7 @@ function CheckoutContent() {
             })}
         </div>
 
-        {/* --- FORMULÁRIO --- */}
+        {/* FORMULÁRIO */}
         <form onSubmit={handlePayment} className="space-y-4">
           <p className="text-xs font-bold text-gray-500 uppercase mt-6">2. Seus Dados</p>
           
@@ -150,7 +157,6 @@ function CheckoutContent() {
             <input name="phone" required type="text" className="w-full bg-black border border-gray-700 rounded p-3 text-sm focus:border-purple-500 outline-none" placeholder="Celular" />
           </div>
 
-          {/* TOTAL E BOTÃO */}
           <div className="pt-4 mt-4 border-t border-gray-800">
             <div className="flex justify-between items-center mb-4">
                 <span className="text-gray-400 text-sm">Total a pagar:</span>
