@@ -89,6 +89,10 @@ export default function Home() {
       
       <footer className="text-center p-14 mt-10 opacity-70 font-bold text-sm uppercase tracking-widest">
         Compra 100% Segura • A Caverna Rio Preto®
+        {/* BOTÃO DA EQUIPE (Discreto) */}
+        <Link href="/staff" className="text-[10px] bg-black/10 hover:bg-black/20 px-3 py-1 rounded text-black/50 hover:text-black transition-colors">
+          🔒 Área da Equipe
+        </Link>
       </footer>
     </div>
   )
