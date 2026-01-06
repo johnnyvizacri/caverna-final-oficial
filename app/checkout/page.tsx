@@ -1,5 +1,5 @@
 'use client'
-import { useState, Suspense } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
 
@@ -7,52 +7,75 @@ function CheckoutContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   
-  // Pega os dados da URL (Nome do evento, Preço e ID do Lote)
   const eventName = searchParams.get('event') || 'Evento'
-  const price = searchParams.get('price') || '0,00'
-  const batchId = searchParams.get('batchId') // <--- O ID do lote vem aqui
-
   const [loading, setLoading] = useState(false)
+  
+  // Estados para Lotes
+  const [batches, setBatches] = useState<any[]>([])
+  const [selectedBatch, setSelectedBatch] = useState<any>(null)
+
+  // Carrega os Lotes assim que abre a página
+  useEffect(() => {
+    async function loadBatches() {
+      // 1. Pega o evento ativo
+      const { data: event } = await supabase.from('events').select('id').eq('status', 'active').single()
+      
+      if (event) {
+        // 2. Busca os lotes desse evento
+        const { data: batchData } = await supabase
+          .from('event_batches')
+          .select('*')
+          .eq('event_id', event.id)
+          .order('price', { ascending: true })
+        
+        if (batchData) {
+            setBatches(batchData)
+            // Tenta selecionar automaticamente o primeiro lote disponível
+            const firstAvailable = batchData.find((b: any) => b.sold_tickets < b.total_tickets)
+            if (firstAvailable) setSelectedBatch(firstAvailable)
+        }
+      }
+    }
+    loadBatches()
+  }, [])
 
   async function handlePayment(e: React.FormEvent) {
     e.preventDefault()
+    
+    if (!selectedBatch) {
+        alert('Por favor, selecione um tipo de ingresso (Lote).')
+        return
+    }
+
     setLoading(true)
     
     const formData = new FormData(e.target as HTMLFormElement)
     const name = formData.get('name') as string
     const email = formData.get('email') as string
     const cpf = formData.get('cpf') as string
+    const phone = formData.get('phone') as string
 
-    // 1. Busca o evento ativo
-    const { data: event } = await supabase.from('events').select('id').eq('status', 'active').single()
+    // 1. Validação Final de Estoque
+    const { data: batchCheck } = await supabase
+        .from('event_batches')
+        .select('sold_tickets, total_tickets')
+        .eq('id', selectedBatch.id)
+        .single()
     
-    if (!event) {
-        alert('Erro: Evento não encontrado.')
+    if (batchCheck && batchCheck.sold_tickets >= batchCheck.total_tickets) {
+        alert('Ops! Esse lote esgotou agora. Escolha outro.')
         setLoading(false)
+        // Recarrega a página para atualizar os lotes
+        window.location.reload()
         return
     }
 
-    // 2. VERIFICAÇÃO DE SEGURANÇA DO LOTE
-    // Antes de vender, vê se não acabou o lote no último segundo
-    if (batchId) {
-        const { data: batchCheck } = await supabase
-            .from('event_batches')
-            .select('sold_tickets, total_tickets')
-            .eq('id', batchId)
-            .single()
-        
-        // Se já vendeu tudo (vendidos >= total), barra a compra
-        if (batchCheck && batchCheck.sold_tickets >= batchCheck.total_tickets) {
-            alert('Ops! Este lote acabou de esgotar. Por favor, volte e escolha o próximo lote.')
-            router.push('/') // Manda o cliente voltar pra Home
-            return
-        }
-    }
-
-    // 3. Gera o código único do ingresso
+    // 2. Cria Ingresso
     const ticketHash = crypto.randomUUID()
+    
+    // Busca ID do evento de novo só pra garantir
+    const { data: event } = await supabase.from('events').select('id').eq('status', 'active').single()
 
-    // 4. Cria o Ingresso no Banco (Status PAID)
     const { data: ticket, error } = await supabase.from('tickets').insert({
         event_id: event.id,
         customer_name: name,
@@ -64,80 +87,92 @@ function CheckoutContent() {
 
     if (error) {
         console.log(error)
-        alert('Erro ao gerar ingresso. Tente novamente.')
+        alert('Erro ao processar.')
         setLoading(false)
     } else {
-        // 5. SUCESSO! AGORA DESCONTA DO LOTE (+1 Vendido)
-        if (batchId) {
-            // Busca quantos já vendeu
-            const { data: currentBatch } = await supabase
-              .from('event_batches')
-              .select('sold_tickets')
-              .eq('id', batchId)
-              .single()
-            
-            if (currentBatch) {
-                // Atualiza somando +1
-                await supabase
-                  .from('event_batches')
-                  .update({ sold_tickets: currentBatch.sold_tickets + 1 })
-                  .eq('id', batchId)
-            }
-        }
+        // 3. Desconta do Lote
+        await supabase
+          .from('event_batches')
+          .update({ sold_tickets: batchCheck.sold_tickets + 1 })
+          .eq('id', selectedBatch.id)
 
-        // Leva para o QR Code
         router.push(`/ticket?id=${ticket.id}`)
     }
   }
 
   return (
-    <div className="min-h-screen bg-black text-white p-6 flex items-center justify-center">
-      <div className="max-w-md w-full bg-gray-900 border border-gray-800 rounded-xl p-8 shadow-2xl">
+    <div className="min-h-screen bg-black text-white p-4 flex items-center justify-center">
+      <div className="max-w-md w-full bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-2xl">
         
-        <h2 className="text-2xl font-bold mb-6 text-center text-yellow-400">CHECKOUT</h2>
-        
-        <div className="bg-black/50 p-4 rounded mb-6 border border-gray-800">
-          <p className="text-gray-400 text-sm uppercase">Resumo do pedido:</p>
-          <p className="font-bold text-lg text-white">{eventName}</p>
-          <div className="flex justify-between items-center mt-2 border-t border-gray-700 pt-2">
-            <span className="text-xs text-gray-400 uppercase">Valor a pagar</span>
-            <span className="text-purple-400 font-bold text-xl">R$ {price.replace('.', ',')}</span>
-          </div>
+        <h2 className="text-xl font-bold mb-4 text-center text-yellow-400 uppercase">Finalizar Compra</h2>
+        <p className="text-center text-white font-bold mb-6">{eventName}</p>
+
+        {/* --- SELEÇÃO DE LOTES --- */}
+        <div className="mb-6 space-y-2">
+            <p className="text-xs font-bold text-gray-500 uppercase">1. Escolha seu ingresso</p>
+            {batches.map(batch => {
+                const isSoldOut = batch.sold_tickets >= batch.total_tickets
+                const isSelected = selectedBatch?.id === batch.id
+                
+                return (
+                    <div 
+                        key={batch.id}
+                        onClick={() => !isSoldOut && setSelectedBatch(batch)}
+                        className={`
+                            p-3 rounded-lg border flex justify-between items-center cursor-pointer transition-all
+                            ${isSoldOut ? 'bg-gray-800 border-gray-800 opacity-50' : 
+                              isSelected ? 'bg-purple-900/30 border-purple-500' : 'bg-black border-gray-700 hover:border-gray-500'}
+                        `}
+                    >
+                        <div>
+                            <p className={`font-bold text-sm ${isSoldOut ? 'line-through text-gray-500' : 'text-white'}`}>{batch.name}</p>
+                            {isSoldOut ? (
+                                <span className="text-[10px] text-red-500 font-bold uppercase">Esgotado</span>
+                            ) : (
+                                <span className="text-[10px] text-gray-400">Resta: {batch.total_tickets - batch.sold_tickets}</span>
+                            )}
+                        </div>
+                        <p className="font-bold text-green-400">R$ {batch.price.toFixed(2).replace('.', ',')}</p>
+                    </div>
+                )
+            })}
         </div>
 
+        {/* --- FORMULÁRIO --- */}
         <form onSubmit={handlePayment} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Nome Completo</label>
-            <input name="name" required type="text" className="w-full bg-black border border-gray-700 rounded p-3 focus:border-purple-500 outline-none placeholder-gray-600" placeholder="Seu nome" />
+          <p className="text-xs font-bold text-gray-500 uppercase mt-6">2. Seus Dados</p>
+          
+          <input name="name" required type="text" className="w-full bg-black border border-gray-700 rounded p-3 text-sm focus:border-purple-500 outline-none" placeholder="Nome Completo" />
+          <input name="email" required type="email" className="w-full bg-black border border-gray-700 rounded p-3 text-sm focus:border-purple-500 outline-none" placeholder="E-mail" />
+          
+          <div className="grid grid-cols-2 gap-3">
+            <input name="cpf" required type="text" className="w-full bg-black border border-gray-700 rounded p-3 text-sm focus:border-purple-500 outline-none" placeholder="CPF" />
+            <input name="phone" required type="text" className="w-full bg-black border border-gray-700 rounded p-3 text-sm focus:border-purple-500 outline-none" placeholder="Celular" />
           </div>
 
-          <div>
-            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">E-mail</label>
-            <input name="email" required type="email" className="w-full bg-black border border-gray-700 rounded p-3 focus:border-purple-500 outline-none placeholder-gray-600" placeholder="seu@email.com" />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">CPF</label>
-              <input name="cpf" required type="text" className="w-full bg-black border border-gray-700 rounded p-3 focus:border-purple-500 outline-none placeholder-gray-600" placeholder="000.000..." />
+          {/* TOTAL E BOTÃO */}
+          <div className="pt-4 mt-4 border-t border-gray-800">
+            <div className="flex justify-between items-center mb-4">
+                <span className="text-gray-400 text-sm">Total a pagar:</span>
+                <span className="text-2xl font-bold text-purple-400">
+                    R$ {selectedBatch ? selectedBatch.price.toFixed(2).replace('.', ',') : '0,00'}
+                </span>
             </div>
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Celular</label>
-              <input name="phone" required type="text" className="w-full bg-black border border-gray-700 rounded p-3 focus:border-purple-500 outline-none placeholder-gray-600" placeholder="(17)..." />
-            </div>
-          </div>
 
-          <button 
-            disabled={loading}
-            type="submit" 
-            className="w-full bg-green-500 hover:bg-green-400 text-black font-black uppercase py-4 rounded mt-4 transition-transform active:scale-95"
-          >
-            {loading ? 'Validando...' : 'Confirmar e Pagar'}
-          </button>
+            <button 
+                disabled={loading || !selectedBatch}
+                type="submit" 
+                className={`w-full font-black uppercase py-4 rounded transition-all active:scale-95 ${
+                    loading || !selectedBatch ? 'bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-400 text-black'
+                }`}
+            >
+                {loading ? 'Processando...' : 'PAGAR AGORA'}
+            </button>
+          </div>
         </form>
 
-        <button onClick={() => window.history.back()} type="button" className="w-full text-center text-gray-500 text-sm mt-4 hover:text-white">
-          Cancelar
+        <button onClick={() => window.history.back()} type="button" className="w-full text-center text-gray-500 text-xs mt-4 hover:text-white">
+          Voltar
         </button>
       </div>
     </div>
@@ -146,7 +181,7 @@ function CheckoutContent() {
 
 export default function Checkout() {
   return (
-    <Suspense fallback={<div className="text-white text-center p-10">Carregando pagamento...</div>}>
+    <Suspense fallback={<div className="text-white text-center p-10">Carregando...</div>}>
       <CheckoutContent />
     </Suspense>
   )

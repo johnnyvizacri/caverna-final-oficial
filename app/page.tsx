@@ -5,122 +5,50 @@ import { supabase } from './lib/supabase'
 
 export default function Home() {
   const [event, setEvent] = useState<any>(null)
-  const [batches, setBatches] = useState<any[]>([])
-  const [selectedBatch, setSelectedBatch] = useState<any>(null)
 
   useEffect(() => {
-    loadEventAndBatches()
-  }, [])
-
-  async function loadEventAndBatches() {
-    // 1. Carrega o Evento
-    const { data: eventData } = await supabase
-      .from('events')
-      .select('*')
-      .eq('status', 'active')
-      .single()
-    
-    if (eventData) {
-      setEvent(eventData)
-      
-      // 2. Carrega os Lotes desse evento
-      const { data: batchData } = await supabase
-        .from('event_batches')
-        .select('*')
-        .eq('event_id', eventData.id)
-        .order('price', { ascending: true }) // Do mais barato pro mais caro
-      
-      if (batchData) {
-        setBatches(batchData)
-        // Seleciona automaticamente o primeiro lote disponível
-        const firstAvailable = batchData.find((b: any) => b.sold_tickets < b.total_tickets)
-        if (firstAvailable) setSelectedBatch(firstAvailable)
-      }
+    // Busca apenas o evento ativo
+    async function loadEvent() {
+      const { data } = await supabase.from('events').select('*').eq('status', 'active').single()
+      if (data) setEvent(data)
     }
-  }
+    loadEvent()
+  }, [])
 
   if (!event) return <div className="min-h-screen bg-black text-white flex items-center justify-center">Carregando festa...</div>
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center">
       
-      {/* Banner / Imagem (Pode melhorar depois) */}
-      <div className="w-full h-64 bg-purple-900 overflow-hidden relative">
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black"></div>
-        <div className="flex items-center justify-center h-full">
-            <h1 className="text-4xl font-black uppercase tracking-tighter z-10">{event.title}</h1>
+      {/* Banner Imersivo */}
+      <div className="w-full h-[60vh] bg-purple-900 relative overflow-hidden">
+        {/* Gradiente para o texto ficar legível */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>
+        
+        {/* Título e Infos no centro/fundo */}
+        <div className="absolute bottom-0 w-full p-8 flex flex-col items-center text-center pb-20">
+            <p className="text-purple-400 font-bold tracking-widest uppercase text-sm mb-2">Próximo Evento</p>
+            <h1 className="text-5xl font-black uppercase tracking-tighter mb-4 leading-none">{event.title}</h1>
+            <div className="flex gap-4 text-sm font-bold text-gray-300 uppercase">
+                <span>📅 {new Date(event.date).toLocaleDateString('pt-BR')}</span>
+                <span>📍 Rio Preto</span>
+            </div>
         </div>
       </div>
 
-      <div className="w-full max-w-md px-6 -mt-10 z-20">
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-2xl">
+      {/* Área de Compra */}
+      <div className="w-full max-w-md px-6 -mt-10 z-20 pb-10">
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-[0_0_50px_rgba(168,85,247,0.2)] text-center">
+          <p className="text-gray-400 mb-6 text-sm">Garanta seu lugar antes que os lotes virem.</p>
           
-          <div className="flex justify-between text-sm text-gray-400 mb-6 font-bold uppercase tracking-widest">
-            <span>{new Date(event.date).toLocaleDateString('pt-BR')}</span>
-            <span>Rio Preto</span>
-          </div>
-
-          <h3 className="text-lg font-bold mb-4 text-white">Escolha seu ingresso:</h3>
-
-          <div className="space-y-3 mb-8">
-            {batches.map((batch) => {
-              const isSoldOut = batch.sold_tickets >= batch.total_tickets
-              const isSelected = selectedBatch?.id === batch.id
-
-              return (
-                <button
-                  key={batch.id}
-                  disabled={isSoldOut}
-                  onClick={() => setSelectedBatch(batch)}
-                  className={`w-full flex justify-between items-center p-4 rounded-lg border-2 transition-all ${
-                    isSoldOut 
-                      ? 'border-gray-800 bg-gray-800/50 opacity-50 cursor-not-allowed' 
-                      : isSelected 
-                        ? 'border-purple-500 bg-purple-500/10 shadow-[0_0_15px_rgba(168,85,247,0.3)]' 
-                        : 'border-gray-700 hover:border-gray-500 bg-black'
-                  }`}
-                >
-                  <div className="text-left">
-                    <p className={`font-bold ${isSoldOut ? 'text-gray-500 line-through' : 'text-white'}`}>
-                      {batch.name}
-                    </p>
-                    {isSoldOut ? (
-                      <span className="text-red-500 text-xs font-bold uppercase">Esgotado</span>
-                    ) : (
-                      <span className="text-gray-400 text-xs">{batch.total_tickets - batch.sold_tickets} unidades restam</span>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    <p className={`font-mono font-bold text-lg ${isSoldOut ? 'text-gray-500' : 'text-green-400'}`}>
-                      R$ {batch.price.toFixed(2).replace('.', ',')}
-                    </p>
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Botão de Compra Dinâmico */}
-          {selectedBatch ? (
-            <Link 
-              href={`/checkout?event=${encodeURIComponent(event.title)}&price=${selectedBatch.price}&batchId=${selectedBatch.id}`}
-              className="block w-full"
-            >
-              <button className="w-full bg-green-500 hover:bg-green-400 text-black font-black uppercase py-4 rounded-lg transition-transform active:scale-95">
-                Comprar {selectedBatch.name} • R$ {selectedBatch.price.toFixed(2).replace('.', ',')}
-              </button>
-            </Link>
-          ) : (
-            <button disabled className="w-full bg-gray-800 text-gray-500 font-bold uppercase py-4 rounded-lg cursor-not-allowed">
-              Selecione um lote
+          <Link href={`/checkout?event=${encodeURIComponent(event.title)}`}>
+            <button className="w-full bg-green-500 hover:bg-green-400 text-black font-black uppercase py-4 rounded-lg text-lg transition-transform active:scale-95 shadow-lg shadow-green-500/20">
+              GARANTIR INGRESSO
             </button>
-          )}
-
+          </Link>
+          
+          <p className="text-xs text-gray-600 mt-4">Compra 100% Segura • A Caverna</p>
         </div>
-        
-        <p className="text-center text-gray-600 text-xs mt-8 pb-8">
-          A Caverna Eventos • Classificação 18 anos
-        </p>
       </div>
     </div>
   )
