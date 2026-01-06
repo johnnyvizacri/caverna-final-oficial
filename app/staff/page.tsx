@@ -6,13 +6,13 @@ import { useRouter } from 'next/navigation'
 export default function StaffLogin() {
   const router = useRouter()
   
-  // Estados de Login
+  // Estados
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState('')
 
-  // Lista de Usuários Permitidos
+  // Lista de Usuários
   const USERS = [
     { u: 'rui', p: '192508' },
     { u: 'johnny', p: 'J0hnny@1' },
@@ -20,7 +20,6 @@ export default function StaffLogin() {
   ]
 
   useEffect(() => {
-    // Verifica se já existe uma sessão salva
     const savedAuth = localStorage.getItem('staff_auth')
     const savedUser = localStorage.getItem('staff_user')
     
@@ -33,7 +32,6 @@ export default function StaffLogin() {
   function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     
-    // Validação (remove espaços e ignora maiúsculas no nome)
     const valid = USERS.find(user => 
       user.u === username.toLowerCase().trim() && 
       user.p === password.trim()
@@ -45,12 +43,12 @@ export default function StaffLogin() {
       setIsAuthenticated(true)
       setCurrentUser(valid.u)
     } else {
-      alert('❌ Acesso Negado: Usuário ou senha incorretos.')
+      alert('Acesso Negado. Verifique usuário e senha.')
     }
   }
 
   function handleLogout() {
-    if (confirm('Deseja realmente sair do sistema?')) {
+    if (confirm('Sair do sistema?')) {
       localStorage.removeItem('staff_auth')
       localStorage.removeItem('staff_user')
       setIsAuthenticated(false)
@@ -59,37 +57,77 @@ export default function StaffLogin() {
     }
   }
 
-  // --- TELA DE LOGIN (QUANDO NÃO ESTÁ LOGADO) ---
+  // --- TELA DE LOGIN ---
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center p-6">
-        <div className="w-full max-w-sm bg-gray-900 p-8 rounded-2xl border border-gray-800 shadow-[0_0_50px_rgba(255,255,0,0.1)]">
-            <div className="text-center mb-8">
-              <h1 className="text-3xl font-black text-yellow-500 uppercase tracking-tighter mb-2">STAFF ACCESS</h1>
-              <p className="text-gray-500 text-xs uppercase tracking-widest">Área restrita da equipe</p>
-            </div>
-
+        <div className="w-full max-w-sm bg-gray-900 p-8 rounded-2xl border border-gray-800">
+            <h1 className="text-2xl font-black text-yellow-500 uppercase text-center mb-6">Staff Access</h1>
+            
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
-                <label className="text-[10px] font-bold text-gray-500 ml-1 uppercase">Usuário</label>
+                <label className="text-xs font-bold text-gray-500 uppercase">Usuário</label>
                 <input 
                   autoFocus
                   value={username} 
                   onChange={e => setUsername(e.target.value)} 
-                  placeholder="Ex: Johnny"
-                  className="w-full bg-black border border-gray-700 rounded-lg p-4 text-white focus:border-yellow-500 outline-none transition-colors" 
+                  className="w-full bg-black border border-gray-700 rounded-lg p-3 text-white focus:border-yellow-500 outline-none" 
                 />
               </div>
               
               <div>
-                <label className="text-[10px] font-bold text-gray-500 ml-1 uppercase">Senha</label>
+                <label className="text-xs font-bold text-gray-500 uppercase">Senha</label>
                 <input 
                   type="password"
                   value={password} 
                   onChange={e => setPassword(e.target.value)} 
-                  placeholder="••••••"
-                  className="w-full bg-black border border-gray-700 rounded-lg p-4 text-white focus:border-yellow-500 outline-none transition-colors" 
+                  className="w-full bg-black border border-gray-700 rounded-lg p-3 text-white focus:border-yellow-500 outline-none" 
                 />
               </div>
 
-              <button className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-black uppercase py
+              <button className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-black uppercase py-4 rounded-lg mt-4">
+                ENTRAR
+              </button>
+            </form>
+            
+            <Link href="/" className="block text-center text-gray-500 text-xs mt-6">← Voltar ao site</Link>
+        </div>
+      </div>
+    )
+  }
+
+  // --- MENU LOGADO ---
+  return (
+    <div className="min-h-screen bg-yellow-500 p-6 flex flex-col items-center justify-center">
+        
+        <div className="w-full max-w-md flex justify-between items-center mb-6">
+            <h1 className="text-2xl font-black uppercase text-black">Olá, {currentUser || 'Staff'}</h1>
+            <button onClick={handleLogout} className="text-black text-xs font-bold underline">SAIR</button>
+        </div>
+
+        <div className="w-full max-w-md space-y-4">
+          
+          <Link href="/checkin">
+            <div className="bg-black text-white p-6 rounded-xl flex items-center gap-4 shadow-xl hover:scale-[1.02] transition-transform cursor-pointer">
+                <span className="text-3xl">📷</span>
+                <div>
+                    <h2 className="font-bold text-lg uppercase">Portaria</h2>
+                    <p className="text-xs text-gray-400">QR Code e Lista</p>
+                </div>
+            </div>
+          </Link>
+
+          <Link href="/staff/novo-evento">
+            <div className="bg-white text-black p-6 rounded-xl flex items-center gap-4 shadow-xl hover:scale-[1.02] transition-transform border-4 border-black">
+                <span className="text-3xl">📅</span>
+                <div>
+                    <h2 className="font-bold text-lg uppercase">Gestão de Eventos</h2>
+                    <p className="text-xs text-gray-600">Criar e Apagar Festas</p>
+                </div>
+            </div>
+          </Link>
+
+        </div>
+    </div>
+  )
+}
