@@ -5,11 +5,11 @@ import { supabase } from '../lib/supabase'
 
 export default function Checkin() {
   const [scanResult, setScanResult] = useState<string | null>(null)
-  const [message, setMessage] = useState('Iniciando câmera...')
-  const [statusColor, setStatusColor] = useState('bg-gray-900')
-  const [hasPermission, setHasPermission] = useState(false)
+  const [message, setMessage] = useState('Aponte para o QR Code')
+  const [statusColor, setStatusColor] = useState('bg-black') // Fundo padrão preto
+  const [showList, setShowList] = useState(false) // Controla se mostra a lista ou camera
   
-  // Lista de Convidados e Filtros
+  // Dados
   const [tickets, setTickets] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   
@@ -20,27 +20,25 @@ export default function Checkin() {
     loadGuestList()
 
     return () => {
+      // Limpeza ao sair
       if (scannerRef.current?.isScanning) {
         scannerRef.current.stop().catch(err => console.error(err))
       }
     }
   }, [])
 
-  // 1. Carrega a lista de quem comprou
   async function loadGuestList() {
     const { data } = await supabase
       .from('tickets')
       .select('*, events(title)')
-      .order('customer_name', { ascending: true }) // Ordem Alfabética
+      .order('customer_name', { ascending: true })
     
     if (data) setTickets(data)
   }
 
-  // 2. Lógica da Câmera (Igual a anterior)
   async function startCamera() {
     try {
       await navigator.mediaDevices.getUserMedia({ video: true })
-      setHasPermission(true)
       
       const html5QrCode = new Html5Qrcode("reader")
       scannerRef.current = html5QrCode
@@ -51,25 +49,20 @@ export default function Checkin() {
         (decodedText) => { onScanSuccess(decodedText) },
         (errorMessage) => {}
       )
-      setMessage('Aponte para o QR Code')
     } catch (err) {
       console.error("Erro câmera:", err)
-      setMessage('⚠️ Use a lista manual abaixo (Câmera bloqueada)')
+      setMessage('⚠️ Câmera bloqueada. Use a Lista Manual.')
     }
   }
 
-  // 3. Quando o QR Code é lido
   async function onScanSuccess(decodedText: string) {
     if(!scannerRef.current) return
     try { await scannerRef.current.pause() } catch(e){}
 
-    // Busca na lista local primeiro para ser rápido
     const ticketIndex = tickets.findIndex(t => t.ticket_hash === decodedText)
     
     if (ticketIndex === -1) {
-      setStatusColor('bg-red-600')
-      setMessage('❌ INGRESSO NÃO ENCONTRADO')
-      resumeScanner()
+      flashScreen('bg-red-600', '❌ INGRESSO NÃO ENCONTRADO')
       return
     }
 
@@ -77,127 +70,143 @@ export default function Checkin() {
     processCheckin(ticket)
   }
 
-  // 4. Função que dá baixa (Serve tanto pro QR Code quanto pro Manual)
   async function processCheckin(ticket: any) {
     if (ticket.status === 'checked_in') {
-      setStatusColor('bg-orange-600')
-      setMessage(`⚠️ JÁ UTILIZADO!\n${ticket.customer_name}`)
-      resumeScanner()
+      flashScreen('bg-orange-600', `⚠️ JÁ ENTROU!\n${ticket.customer_name}`)
     } else {
-      // Atualiza no Banco
+      // Atualiza Banco
       await supabase
         .from('tickets')
         .update({ status: 'checked_in', checked_in_at: new Date() })
         .eq('id', ticket.id)
 
-      // Atualiza na Lista Local (para o contador mudar na hora)
+      // Atualiza Local
       const updatedList = tickets.map(t => 
         t.id === ticket.id ? { ...t, status: 'checked_in', checked_in_at: new Date() } : t
       )
       setTickets(updatedList)
 
-      setStatusColor('bg-green-600')
-      setMessage(`✅ LIBERADO!\n${ticket.customer_name}`)
-      resumeScanner()
+      flashScreen('bg-green-600', `✅ LIBERADO!\n${ticket.customer_name}`)
     }
   }
 
-  function resumeScanner() {
+  // Função para piscar a tela com a cor do resultado e voltar pro preto
+  function flashScreen(color: string, msg: string) {
+    setStatusColor(color)
+    setMessage(msg)
+    
     setTimeout(async () => {
-      setStatusColor('bg-gray-900')
+      setStatusColor('bg-black') // Volta pro preto neutro
       setMessage('Pronto para o próximo...')
       try { await scannerRef.current?.resume() } catch(e){}
     }, 2500)
   }
 
-  // 5. Cálculos dos Contadores
+  // Contadores
   const totalVendidos = tickets.length
   const totalEntraram = tickets.filter(t => t.status === 'checked_in').length
   const totalFaltam = totalVendidos - totalEntraram
 
-  // Filtro de busca por nome
+  // Filtro
   const filteredTickets = tickets.filter(t => 
     t.customer_name.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
   return (
-    <div className={`min-h-screen ${statusColor} text-white transition-colors duration-500 flex flex-col`}>
+    <div className={`min-h-screen ${statusColor} text-white transition-colors duration-300 flex flex-col relative`}>
       
-      {/* CÂMERA E MENSAGEM */}
-      <div className="p-4 bg-black/20 backdrop-blur-sm sticky top-0 z-10 shadow-xl">
-        <h1 className="text-xl font-bold text-center mb-2 uppercase">Portaria Caverna</h1>
+      {/* --- CABEÇALHO FIXO COM CONTADORES --- */}
+      <div className="bg-gray-900/90 backdrop-blur p-3 grid grid-cols-3 gap-2 text-center border-b border-gray-700 z-20">
+        <div className="bg-green-900/50 rounded p-1">
+          <span className="block text-xl font-bold text-green-400">{totalEntraram}</span>
+          <span className="text-[10px] uppercase">Dentro</span>
+        </div>
+        <div className="bg-red-900/50 rounded p-1">
+          <span className="block text-xl font-bold text-red-400">{totalFaltam}</span>
+          <span className="text-[10px] uppercase">Faltam</span>
+        </div>
+        <div className="bg-gray-700/50 rounded p-1">
+          <span className="block text-xl font-bold text-white">{totalVendidos}</span>
+          <span className="text-[10px] uppercase">Total</span>
+        </div>
+      </div>
+
+      {/* --- ÁREA DA CÂMERA (OCUPA TUDO) --- */}
+      <div className="flex-1 relative bg-black">
+        <div id="reader" className="w-full h-full object-cover absolute inset-0"></div>
         
-        {/* Painel de Status da Leitura */}
-        <div className="bg-white/10 p-3 rounded-lg text-center mb-4 border border-white/20">
-          <p className="font-bold whitespace-pre-line text-lg">{message}</p>
-        </div>
-
-        {/* Área da Câmera (Escondida se quiser focar na lista) */}
-        <div className="bg-black rounded-lg overflow-hidden border border-white/10 h-48 w-full relative">
-            <div id="reader" className="w-full h-full object-cover"></div>
+        {/* Mensagem Flutuante sobre a câmera */}
+        <div className="absolute bottom-24 left-0 right-0 text-center px-4 pointer-events-none">
+          <span className="bg-black/60 text-white px-4 py-2 rounded-full font-bold text-lg backdrop-blur-sm whitespace-pre-line shadow-lg">
+            {message}
+          </span>
         </div>
       </div>
 
-      {/* PLACAR DE PÚBLICO */}
-      <div className="grid grid-cols-3 gap-2 p-4 text-center bg-black/40 text-xs font-mono uppercase tracking-widest border-b border-white/10">
-        <div className="bg-green-900/40 p-2 rounded">
-          <span className="block text-2xl font-bold text-green-400">{totalEntraram}</span>
-          Entraram
-        </div>
-        <div className="bg-red-900/40 p-2 rounded">
-          <span className="block text-2xl font-bold text-red-400">{totalFaltam}</span>
-          Faltam
-        </div>
-        <div className="bg-gray-800 p-2 rounded">
-          <span className="block text-2xl font-bold text-white">{totalVendidos}</span>
-          Total
-        </div>
+      {/* --- BOTÃO FLUTUANTE PARA LISTA MANUAL --- */}
+      <div className="fixed bottom-6 right-6 z-30">
+        <button 
+          onClick={() => setShowList(true)}
+          className="bg-white text-black w-14 h-14 rounded-full shadow-[0_0_20px_rgba(255,255,255,0.5)] flex items-center justify-center font-bold text-2xl active:scale-90 transition-transform"
+        >
+          📋
+        </button>
       </div>
 
-      {/* LISTA DE CONVIDADOS */}
-      <div className="flex-1 bg-white text-black p-4 rounded-t-3xl mt-2 overflow-y-auto">
-        <h3 className="font-bold text-gray-500 uppercase text-xs mb-3 tracking-widest">Lista de Nomes (A-Z)</h3>
-        
-        {/* Campo de Busca Rápida */}
-        <input 
-          type="text" 
-          placeholder="Buscar nome..." 
-          className="w-full bg-gray-100 border-none rounded-lg p-3 mb-4 text-sm focus:ring-2 ring-purple-500 outline-none"
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
+      {/* --- MODAL DA LISTA MANUAL (SOBREPÕE TUDO) --- */}
+      {showList && (
+        <div className="fixed inset-0 bg-gray-900 z-50 flex flex-col animate-in slide-in-from-bottom duration-300">
+          <div className="p-4 bg-gray-800 flex justify-between items-center shadow-lg">
+            <h2 className="font-bold text-lg uppercase">Lista de Convidados</h2>
+            <button 
+              onClick={() => setShowList(false)}
+              className="text-gray-400 hover:text-white font-bold p-2"
+            >
+              FECHAR ✕
+            </button>
+          </div>
 
-        <div className="space-y-3 pb-20">
-          {filteredTickets.map((ticket) => (
-            <div key={ticket.id} className="flex items-center justify-between border-b border-gray-100 pb-3">
-              <div>
-                <p className="font-bold text-sm truncate w-48">{ticket.customer_name}</p>
-                <p className="text-xs text-gray-400">CPF: {ticket.customer_cpf}</p>
-              </div>
-              
-              {ticket.status === 'checked_in' ? (
-                <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold border border-green-200">
-                  JÁ ENTROU
-                </span>
-              ) : (
-                <button 
-                  onClick={() => {
-                    if(confirm(`Confirmar entrada manual de ${ticket.customer_name}?`)) {
-                      processCheckin(ticket)
-                    }
-                  }}
-                  className="bg-black text-white px-4 py-2 rounded-lg text-xs font-bold uppercase active:scale-95 transition-transform"
-                >
-                  Liberar
-                </button>
-              )}
-            </div>
-          ))}
+          <div className="p-4 bg-gray-900 border-b border-gray-800">
+             <input 
+              autoFocus
+              type="text" 
+              placeholder="Buscar nome ou CPF..." 
+              className="w-full bg-black border border-gray-700 rounded-lg p-4 text-white focus:border-purple-500 outline-none"
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
 
-          {filteredTickets.length === 0 && (
-            <p className="text-center text-gray-400 text-sm mt-10">Nenhum ingresso encontrado.</p>
-          )}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-20">
+             {filteredTickets.map((ticket) => (
+                <div key={ticket.id} className="flex items-center justify-between bg-black/40 p-3 rounded-lg border border-gray-800">
+                  <div>
+                    <p className="font-bold text-white">{ticket.customer_name}</p>
+                    <p className="text-xs text-gray-500">{ticket.customer_cpf} • {ticket.events?.title}</p>
+                  </div>
+                  
+                  {ticket.status === 'checked_in' ? (
+                    <span className="text-green-500 text-xs font-bold border border-green-900 bg-green-900/20 px-3 py-1 rounded">
+                      ENTROU
+                    </span>
+                  ) : (
+                    <button 
+                      onClick={() => {
+                        if(confirm(`Liberar entrada de ${ticket.customer_name}?`)) {
+                          processCheckin(ticket)
+                          setShowList(false) // Fecha a lista após liberar
+                        }
+                      }}
+                      className="bg-white text-black px-4 py-2 rounded font-bold text-xs uppercase hover:bg-gray-200"
+                    >
+                      Liberar
+                    </button>
+                  )}
+                </div>
+              ))}
+              {filteredTickets.length === 0 && <p className="text-center text-gray-500 mt-10">Ninguém encontrado.</p>}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
