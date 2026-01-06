@@ -40,7 +40,6 @@ export default function Home() {
         </div>
 
         <nav className="flex gap-6 md:gap-10 items-center font-bold uppercase text-sm md:text-base tracking-tight">
-          <a href="#events" className="hover:underline decoration-4 underline-offset-4">Ingressos</a>
           <a href="https://www.google.com/maps/search/?api=1&query=Avenida+da+Saudade,4066,São+José+do+Rio+Preto" target="_blank" className="hover:underline decoration-4 underline-offset-4">Localização</a>
           <Link href="/minha-conta">
             <button className="bg-white text-black px-8 py-3 rounded-full font-black hover:scale-105 transition-transform shadow-lg">
