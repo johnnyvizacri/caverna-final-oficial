@@ -1,89 +1,127 @@
 'use client'
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { supabase } from './lib/supabase'
 
 export default function Home() {
-  const [events, setEvents] = useState<any[]>([])
+  const [event, setEvent] = useState<any>(null)
+  const [batches, setBatches] = useState<any[]>([])
+  const [selectedBatch, setSelectedBatch] = useState<any>(null)
 
-  // Buscar eventos assim que a página carrega
   useEffect(() => {
-    getEvents()
+    loadEventAndBatches()
   }, [])
 
-  async function getEvents() {
-    // Busca todos os eventos ativos no Supabase
-    const { data, error } = await supabase
+  async function loadEventAndBatches() {
+    // 1. Carrega o Evento
+    const { data: eventData } = await supabase
       .from('events')
       .select('*')
       .eq('status', 'active')
+      .single()
     
-    if (data) setEvents(data)
-    if (error) console.log('Erro ao buscar:', error)
+    if (eventData) {
+      setEvent(eventData)
+      
+      // 2. Carrega os Lotes desse evento
+      const { data: batchData } = await supabase
+        .from('event_batches')
+        .select('*')
+        .eq('event_id', eventData.id)
+        .order('price', { ascending: true }) // Do mais barato pro mais caro
+      
+      if (batchData) {
+        setBatches(batchData)
+        // Seleciona automaticamente o primeiro lote disponível
+        const firstAvailable = batchData.find((b: any) => b.sold_tickets < b.total_tickets)
+        if (firstAvailable) setSelectedBatch(firstAvailable)
+      }
+    }
   }
 
+  if (!event) return <div className="min-h-screen bg-black text-white flex items-center justify-center">Carregando festa...</div>
+
   return (
-    <main className="min-h-screen bg-black text-white font-sans">
-      {/* Cabeçalho */}
-      <header className="p-6 border-b border-gray-800 flex justify-between items-center sticky top-0 bg-black/90 backdrop-blur z-10">
-        <h1 className="text-2xl font-bold tracking-tighter text-yellow-400 uppercase">
-          A Caverna <span className="text-white text-xs block font-normal tracking-normal">Rio Preto</span>
-        </h1>
-      </header>
+    <div className="min-h-screen bg-black text-white flex flex-col items-center">
+      
+      {/* Banner / Imagem (Pode melhorar depois) */}
+      <div className="w-full h-64 bg-purple-900 overflow-hidden relative">
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black"></div>
+        <div className="flex items-center justify-center h-full">
+            <h1 className="text-4xl font-black uppercase tracking-tighter z-10">{event.title}</h1>
+        </div>
+      </div>
 
-      {/* Hero Section */}
-      <section className="py-12 px-6 text-center">
-        <h2 className="text-4xl md:text-6xl font-black mb-4 bg-gradient-to-r from-purple-500 to-pink-500 text-transparent bg-clip-text">
-          AGENDA
-        </h2>
-        <p className="text-gray-400 max-w-md mx-auto">
-          Garanta seu ingresso antecipado e evite filas.
-        </p>
-      </section>
-
-      {/* Lista de Eventos */}
-      <section className="px-6 pb-20 max-w-4xl mx-auto">
-        <div className="grid gap-6 md:grid-cols-2">
+      <div className="w-full max-w-md px-6 -mt-10 z-20">
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-2xl">
           
-          {events.map((event) => (
-            <div key={event.id} className="group border border-gray-800 rounded-xl overflow-hidden hover:border-purple-500 transition-all bg-gray-900/50">
-              {/* Imagem do Evento */}
-              <div className="h-48 overflow-hidden relative">
-                <img 
-                  src={event.image_url || 'https://via.placeholder.com/800x400'} 
-                  alt={event.title}
-                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                />
-                <div className="absolute top-4 right-4 bg-yellow-400 text-black font-bold px-3 py-1 rounded-full text-sm">
-                  R$ {event.price}
-                </div>
-              </div>
+          <div className="flex justify-between text-sm text-gray-400 mb-6 font-bold uppercase tracking-widest">
+            <span>{new Date(event.date).toLocaleDateString('pt-BR')}</span>
+            <span>Rio Preto</span>
+          </div>
 
-              {/* Informações */}
-              <div className="p-5">
-                <p className="text-purple-400 text-xs font-bold uppercase tracking-widest mb-2">
-                  {new Date(event.date).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}
-                </p>
-                <h3 className="text-xl font-bold mb-2 leading-tight">{event.title}</h3>
-                <p className="text-gray-400 text-sm line-clamp-2 mb-4">{event.description}</p>
-                
-                <a 
-  href={`/checkout?event=${encodeURIComponent(event.title)}&price=${event.price}`}
-  className="block w-full text-center py-3 bg-white text-black font-bold uppercase tracking-wide hover:bg-purple-500 hover:text-white transition-colors rounded"
->
-  Comprar Ingresso
-</a>
-              </div>
-            </div>
-          ))}
+          <h3 className="text-lg font-bold mb-4 text-white">Escolha seu ingresso:</h3>
+
+          <div className="space-y-3 mb-8">
+            {batches.map((batch) => {
+              const isSoldOut = batch.sold_tickets >= batch.total_tickets
+              const isSelected = selectedBatch?.id === batch.id
+
+              return (
+                <button
+                  key={batch.id}
+                  disabled={isSoldOut}
+                  onClick={() => setSelectedBatch(batch)}
+                  className={`w-full flex justify-between items-center p-4 rounded-lg border-2 transition-all ${
+                    isSoldOut 
+                      ? 'border-gray-800 bg-gray-800/50 opacity-50 cursor-not-allowed' 
+                      : isSelected 
+                        ? 'border-purple-500 bg-purple-500/10 shadow-[0_0_15px_rgba(168,85,247,0.3)]' 
+                        : 'border-gray-700 hover:border-gray-500 bg-black'
+                  }`}
+                >
+                  <div className="text-left">
+                    <p className={`font-bold ${isSoldOut ? 'text-gray-500 line-through' : 'text-white'}`}>
+                      {batch.name}
+                    </p>
+                    {isSoldOut ? (
+                      <span className="text-red-500 text-xs font-bold uppercase">Esgotado</span>
+                    ) : (
+                      <span className="text-gray-400 text-xs">{batch.total_tickets - batch.sold_tickets} unidades restam</span>
+                    )}
+                  </div>
+                  <div className="text-right">
+                    <p className={`font-mono font-bold text-lg ${isSoldOut ? 'text-gray-500' : 'text-green-400'}`}>
+                      R$ {batch.price.toFixed(2).replace('.', ',')}
+                    </p>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Botão de Compra Dinâmico */}
+          {selectedBatch ? (
+            <Link 
+              href={`/checkout?event=${encodeURIComponent(event.title)}&price=${selectedBatch.price}&batchId=${selectedBatch.id}`}
+              className="block w-full"
+            >
+              <button className="w-full bg-green-500 hover:bg-green-400 text-black font-black uppercase py-4 rounded-lg transition-transform active:scale-95">
+                Comprar {selectedBatch.name} • R$ {selectedBatch.price.toFixed(2).replace('.', ',')}
+              </button>
+            </Link>
+          ) : (
+            <button disabled className="w-full bg-gray-800 text-gray-500 font-bold uppercase py-4 rounded-lg cursor-not-allowed">
+              Selecione um lote
+            </button>
+          )}
 
         </div>
-
-        {events.length === 0 && (
-          <div className="text-center text-gray-500 py-20">
-            Carregando eventos...
-          </div>
-        )}
-      </section>
-    </main>
+        
+        <p className="text-center text-gray-600 text-xs mt-8 pb-8">
+          A Caverna Eventos • Classificação 18 anos
+        </p>
+      </div>
+    </div>
   )
 }
