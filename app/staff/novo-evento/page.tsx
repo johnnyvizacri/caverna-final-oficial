@@ -1,149 +1,152 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 
-export default function NovoEvento() {
+export default function GerenciarEventos() {
   const router = useRouter()
-  const [loading, setLoading] = useState(false)
-
-  // Dados do Evento
+  const [events, setEvents] = useState<any[]>([])
+  
+  // Formulario
   const [title, setTitle] = useState('')
   const [date, setDate] = useState('')
-  const [time, setTime] = useState('23:00')
-  const [description, setDescription] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  // Dados dos Lotes (Começa com 1 lote vazio)
-  const [batches, setBatches] = useState([
-    { name: '1º Lote', price: '', quantity: '' }
-  ])
+  // 1. Proteção de Login
+  useEffect(() => {
+    const isAuth = localStorage.getItem('staff_auth')
+    if (isAuth !== 'true') {
+      router.push('/staff')
+    } else {
+      loadEvents()
+    }
+  }, [])
 
-  // Adicionar novo campo de lote dinamicamente
-  function addBatch() {
-    setBatches([...batches, { name: `${batches.length + 1}º Lote`, price: '', quantity: '' }])
-  }
-
-  // Atualizar dados de um lote específico
-  function updateBatch(index: number, field: string, value: string) {
-    const newBatches = [...batches]
-    // @ts-ignore
-    newBatches[index][field] = value
-    setBatches(newBatches)
+  async function loadEvents() {
+    const { data } = await supabase.from('events').select('*').order('created_at', { ascending: false })
+    if (data) setEvents(data)
   }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
 
-    try {
-      // 1. Desativar eventos antigos (Opcional: se quiser só 1 festa por vez)
-      await supabase.from('events').update({ status: 'finished' }).eq('status', 'active')
+    // Primeiro desativa qualquer outro evento ativo (para garantir que só tem 1 ativo na Home)
+    await supabase.from('events').update({ status: 'archived' }).neq('status', 'archived')
 
-      // 2. Criar o Evento Novo
-      // Junta Data e Hora num formato ISO
-      const fullDate = new Date(`${date}T${time}:00`)
+    // Cria o novo evento
+    const { data: newEvent, error } = await supabase
+      .from('events')
+      .insert({ title, date, status: 'active', location: 'A Caverna' })
+      .select()
+      .single()
 
-      const { data: event, error: eventError } = await supabase
-        .from('events')
-        .insert({
-          title,
-          description,
-          date: fullDate.toISOString(),
-          status: 'active' // Já nasce ativo
-        })
-        .select()
-        .single()
-
-      if (eventError) throw eventError
-
-      // 3. Criar os Lotes vinculados a esse evento
-      const batchesToInsert = batches.map(b => ({
-        event_id: event.id,
-        name: b.name,
-        price: parseFloat(b.price.replace(',', '.')), // Converte "10,00" pra número
-        total_tickets: parseInt(b.quantity),
-        sold_tickets: 0
-      }))
-
-      const { error: batchError } = await supabase.from('event_batches').insert(batchesToInsert)
-      if (batchError) throw batchError
-
-      alert('✅ Evento e Lotes criados com sucesso!')
-      router.push('/') // Vai pra home ver o resultado
-
-    } catch (error) {
+    if (error) {
+      alert('Erro ao criar evento')
       console.error(error)
-      alert('Erro ao criar evento. Verifique os dados.')
-    } finally {
-      setLoading(false)
+    } else {
+      // Cria Lotes Padrão
+      await supabase.from('event_batches').insert([
+        { event_id: newEvent.id, name: '1º Lote Promocional', price: 15.00, total_tickets: 50 },
+        { event_id: newEvent.id, name: '2º Lote', price: 20.00, total_tickets: 100 },
+        { event_id: newEvent.id, name: '3º Lote Final', price: 30.00, total_tickets: 100 }
+      ])
+      
+      alert('Evento Criado com Sucesso!')
+      setTitle('')
+      setDate('')
+      loadEvents()
+    }
+    setLoading(false)
+  }
+
+  // --- FUNÇÃO DE EXCLUIR ROBUSTA ---
+  async function handleDelete(id: string) {
+    const confirmacao = window.confirm('TEM CERTEZA? Isso vai apagar o evento e TODOS os ingressos vendidos. Não tem volta.')
+    
+    if (confirmacao) {
+      // 1. Apaga Lotes
+      await supabase.from('event_batches').delete().eq('event_id', id)
+      // 2. Apaga Ingressos
+      await supabase.from('tickets').delete().eq('event_id', id)
+      // 3. Apaga Evento
+      const { error } = await supabase.from('events').delete().eq('id', id)
+      
+      if (error) {
+        alert('Erro ao excluir. Verifique se liberou o DELETE no SQL do Supabase.')
+        console.error(error)
+      } else {
+        alert('Evento excluído.')
+        loadEvents()
+        router.refresh() // Força atualização do site
+      }
     }
   }
 
   return (
     <div className="min-h-screen bg-gray-100 text-black p-6 pb-20">
-      <div className="max-w-2xl mx-auto">
-        <h1 className="text-2xl font-black uppercase mb-6">Cadastrar Novo Evento</h1>
+      <div className="max-w-md mx-auto">
+        <button onClick={() => router.push('/staff')} className="text-xs font-bold text-gray-500 mb-4 flex items-center">
+             ← VOLTAR AO MENU
+        </button>
         
-        <form onSubmit={handleCreate} className="space-y-6">
-          
-          {/* SEÇÃO 1: INFORMAÇÕES BÁSICAS */}
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-            <h3 className="font-bold text-gray-500 uppercase text-xs mb-4 border-b pb-2">1. Informações Básicas</h3>
-            
-            <label className="block text-sm font-bold mb-1">Nome do Evento</label>
-            <input required type="text" placeholder="Ex: Summer Breeze" className="w-full bg-gray-50 border p-3 rounded-lg mb-4 outline-none focus:ring-2 ring-yellow-500" value={title} onChange={e => setTitle(e.target.value)} />
+        <h1 className="text-3xl font-black uppercase mb-6 tracking-tighter">Eventos</h1>
 
-            <div className="flex gap-4 mb-4">
-              <div className="flex-1">
-                <label className="block text-sm font-bold mb-1">Data</label>
-                <input required type="date" className="w-full bg-gray-50 border p-3 rounded-lg outline-none focus:ring-2 ring-yellow-500" value={date} onChange={e => setDate(e.target.value)} />
-              </div>
-              <div className="w-32">
-                <label className="block text-sm font-bold mb-1">Horário</label>
-                <input required type="time" className="w-full bg-gray-50 border p-3 rounded-lg outline-none focus:ring-2 ring-yellow-500" value={time} onChange={e => setTime(e.target.value)} />
-              </div>
+        {/* CARD DE CRIAÇÃO */}
+        <div className="bg-white p-6 rounded-xl shadow-xl mb-8 border border-gray-200">
+          <h2 className="font-bold text-lg mb-4 text-purple-600 uppercase border-b pb-2">Novo Evento</h2>
+          <form onSubmit={handleCreate} className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-gray-400 mb-1">NOME DA FESTA</label>
+              <input 
+                required 
+                value={title} 
+                onChange={e => setTitle(e.target.value)} 
+                className="w-full border-2 border-gray-200 p-3 rounded-lg font-bold outline-none focus:border-purple-500 transition-colors" 
+                placeholder="Ex: Baile da Caverna" 
+              />
             </div>
-
-            <label className="block text-sm font-bold mb-1">Descrição / Atrações</label>
-            <textarea required rows={3} placeholder="Descreva as atrações..." className="w-full bg-gray-50 border p-3 rounded-lg outline-none focus:ring-2 ring-yellow-500" value={description} onChange={e => setDescription(e.target.value)} />
-          </div>
-
-          {/* SEÇÃO 2: LOTES / INGRESSOS */}
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-            <h3 className="font-bold text-gray-500 uppercase text-xs mb-4 border-b pb-2">2. Ingressos (Lotes)</h3>
-            <p className="text-xs text-gray-400 mb-4">Defina o preço e a quantidade. O link de pagamento será gerado automaticamente.</p>
-
-            {batches.map((batch, index) => (
-              <div key={index} className="flex gap-3 mb-3 items-end bg-gray-50 p-3 rounded-lg border border-gray-100">
-                <div className="flex-1">
-                  <label className="text-[10px] font-bold uppercase text-gray-500">Nome do Lote</label>
-                  <input type="text" value={batch.name} onChange={e => updateBatch(index, 'name', e.target.value)} className="w-full bg-white border p-2 rounded text-sm font-bold" />
-                </div>
-                <div className="w-24">
-                  <label className="text-[10px] font-bold uppercase text-gray-500">Qtd.</label>
-                  <input type="number" placeholder="0" value={batch.quantity} onChange={e => updateBatch(index, 'quantity', e.target.value)} className="w-full bg-white border p-2 rounded text-sm text-center" />
-                </div>
-                <div className="w-24">
-                  <label className="text-[10px] font-bold uppercase text-gray-500">Preço (R$)</label>
-                  <input type="text" placeholder="0,00" value={batch.price} onChange={e => updateBatch(index, 'price', e.target.value)} className="w-full bg-white border p-2 rounded text-sm text-center font-bold text-green-600" />
-                </div>
-              </div>
-            ))}
-
-            <button type="button" onClick={addBatch} className="text-sm font-bold text-blue-600 hover:underline mt-2 flex items-center gap-1">
-              + Adicionar mais um lote
+            <div>
+              <label className="block text-xs font-bold text-gray-400 mb-1">DATA E HORA</label>
+              <input 
+                required 
+                type="datetime-local" 
+                value={date} 
+                onChange={e => setDate(e.target.value)} 
+                className="w-full border-2 border-gray-200 p-3 rounded-lg outline-none focus:border-purple-500 transition-colors" 
+              />
+            </div>
+            <button 
+                disabled={loading} 
+                className="w-full bg-black text-white font-black uppercase py-4 rounded-lg hover:bg-gray-800 transition-transform active:scale-95"
+            >
+              {loading ? 'Criando...' : 'Publicar Evento'}
             </button>
-          </div>
+          </form>
+        </div>
 
-          {/* BOTÃO FINAL */}
-          <div className="flex gap-4 pt-4">
-             <button type="button" onClick={() => router.back()} className="flex-1 bg-gray-300 font-bold py-4 rounded-lg uppercase">Cancelar</button>
-             <button disabled={loading} type="submit" className="flex-[2] bg-green-500 text-white font-black py-4 rounded-lg uppercase shadow-lg hover:bg-green-600 transition-colors">
-               {loading ? 'Salvando...' : 'Publicar Evento'}
-             </button>
-          </div>
-
-        </form>
+        {/* LISTA DE EXISTENTES */}
+        <h2 className="font-bold text-xs text-gray-400 mb-3 uppercase tracking-widest">Eventos Ativos</h2>
+        <div className="space-y-3">
+          {events.length === 0 && <p className="text-gray-400 text-sm">Nenhum evento encontrado.</p>}
+          
+          {events.map(evt => (
+            <div key={evt.id} className="bg-white p-4 rounded-lg shadow-sm flex justify-between items-center border-l-4 border-green-500">
+              <div>
+                <p className="font-bold text-lg leading-none">{evt.title}</p>
+                <p className="text-xs text-gray-500 mt-1 uppercase font-bold">
+                    {new Date(evt.date).toLocaleDateString('pt-BR')} • {evt.status}
+                </p>
+              </div>
+              <button 
+                onClick={() => handleDelete(evt.id)} 
+                className="text-red-600 hover:text-white hover:bg-red-600 text-[10px] font-bold border border-red-200 px-3 py-2 rounded transition-colors uppercase"
+              >
+                Excluir
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )
